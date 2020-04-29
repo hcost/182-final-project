@@ -2,16 +2,18 @@ import base64
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
+
 import numpy as np
 import PIL.Image
 import pyvirtualdisplay
 import gym as gym
 import tf_agents
+import os
 
 import tensorflow as tf
 
 from tf_agents.agents.dqn import dqn_agent
-from tf_agents.drivers import dynamic_episode_driver
+from tf_agents.drivers import dynamic_step_driver
 from tf_agents.environments import suite_gym
 from tf_agents.environments import tf_py_environment
 from tf_agents.environments import parallel_py_environment as ppenv
@@ -22,30 +24,6 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
-
-"""
-A great deal of this code comes from the DQN tutorial using the tf_agents library. I have made adjustments where 
-necessary, but credit must be attributed to: https://www.tensorflow.org/agents/tutorials/1_dqn_tutorial
-That being said, this still does not work very well yet.
-
-The adjustments I have made include initialization of a double dqn instead of just a regular dqn, and use of the 
-tf_agents drivers for collecting data and adding to the replay buffer. More adjustments will be made as soon as we
-get the code working and are actually able to start tweaking it.
-"""
-
-### HYPERPARAMETERS ###
-parallel_train = 4
-learning_rate = 0.0001
-optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate)
-
-fc_layer_params = (100,)
-batch_size = 128
-num_iterations = 20000
-collect_per_iteration = 1
-
-eval_interval = 1000
-num_eval_episodes = 10
-log_interval = 200
 
 env_names = ["procgen:procgen-coinrun-v0",
              'procgen:procgen-starpilot-v0',
@@ -64,92 +42,125 @@ env_names = ["procgen:procgen-coinrun-v0",
              'procgen:procgen-ninja-v0',
              'procgen:procgen-bossfight-v0']
 
-env_name = 'procgen:procgen-coinrun-v0'
-env = gym.make(env_name)
-obs = env.reset()
 
-train_py_env = suite_gym.load(env_name)
-eval_py_env = suite_gym.load(env_name)
+class DQN:
+    def __init__(self,
+                 learning_rate=1e-3,
+                 batch_size=64,
+                 fc_layer_params=(100,),
+                 env_name=env_names[0],
+                 num_iterations=20000,
+                 DDQN=False,
+                 epsilon=0.1,
+                 initial_collect_steps=1000):
+        self.learning_rate = learning_rate
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate)
+        self.fc_layer_params = fc_layer_params
+        self.epsilon = epsilon
+        self.num_iterations = num_iterations
+        self.initial_collect_steps = initial_collect_steps
 
-train_env = tf_py_environment.TFPyEnvironment(train_py_env)
-eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
-train_step_counter = tf.Variable(0)
+        self.env_name = env_name
+        train_py_env = suite_gym.load(self.env_name)
+        eval_py_env = suite_gym.load(self.env_name)
+        self.train_env = tf_py_environment.TFPyEnvironment(train_py_env)
+        self.eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
-q_net = q_network.QNetwork(
-    train_env.observation_spec(),
-    train_env.action_spec(),
-    fc_layer_params=fc_layer_params)
+        root_dir = os.path.expanduser('/content/drive/My Drive/Colab Notebooks/final')
+        self.train_dir = os.path.join(root_dir, 'train')
 
-agent = dqn_agent.DdqnAgent(
-    train_env.time_step_spec(),
-    train_env.action_spec(),
-    q_network=q_net,
-    epsilon_greedy=0.15,
-    optimizer=optimizer,
-    td_errors_loss_fn=common.element_wise_huber_loss,
-    train_step_counter=train_step_counter)
+        if DDQN:
+            init_agent = dqn_agent.DdqnAgent
+        else:
+            init_agent = dqn_agent.DqnAgent
 
-agent.initialize()
+        obs = self.train_env.reset()
 
-eval_policy = agent.policy
-collect_policy = agent.collect_policy
+        self.q_net = q_network.QNetwork(
+            self.train_env.observation_spec(),
+            self.train_env.action_spec(),
+            fc_layer_params=fc_layer_params)
 
-buffer = tf_agents.replay_buffers.tf_uniform_replay_buffer.TFUniformReplayBuffer(
-    data_spec=agent.collect_data_spec,
-    batch_size=train_env.batch_size,
-    max_length=100000
-)
+        self.batch_size = batch_size
 
-dataset = buffer.as_dataset(
-    num_parallel_calls=3,
-    sample_batch_size=batch_size,
-    num_steps=2).prefetch(3)
+        self.agent = init_agent(
+            self.train_env.time_step_spec(),
+            self.train_env.action_spec(),
+            q_network=self.q_net,
+            epsilon_greedy=None,
+            boltzmann_temperature=0.4,
+            optimizer=self.optimizer,
+            target_update_tau=1,
+            target_update_period=1000,
+            td_errors_loss_fn=common.element_wise_huber_loss,
+            train_step_counter=tf.Variable(0))
 
-metric = tf_metrics.AverageReturnMetric()
+        self.returns = []
 
-num_episodes = tf_metrics.NumberOfEpisodes()
-env_steps = tf_metrics.EnvironmentSteps()
+    def train_eval(self, num_iterations=20000, log_interval=200, eval_interval=1000):
+        global_step = tf.compat.v1.train.get_or_create_global_step()
 
-observers = [buffer.add_batch]
-d = dynamic_episode_driver.DynamicEpisodeDriver(eval_env, collect_policy, observers=observers, num_episodes=1)
-d.run()
-"""
-print('final_time_step', final_time_step)
-print('Number of Steps: ', env_steps.result().numpy())
-print('Number of Episodes: ', num_episodes.result().numpy())
-print('Average Return: ', metric.result().numpy())
-"""
-returns = []
-dataset = buffer.as_dataset(
-    num_parallel_calls=3,
-    sample_batch_size=batch_size,
-    num_steps=2).prefetch(3)
+        replay_buffer = tf_agents.replay_buffers.tf_uniform_replay_buffer.TFUniformReplayBuffer(
+            data_spec=self.agent.collect_data_spec,
+            batch_size=self.train_env.batch_size,
+            max_length=100000
+        )
 
-iterator = iter(dataset)
+        self.eval_policy = self.agent.policy
+        observers = [replay_buffer.add_batch]
 
-agent.train_step_counter.assign(0)
-for _ in range(num_iterations):
-    experience, _ = next(iterator)
-    loss = agent.train(experience=experience).loss
-    step = agent.train_step_counter.numpy()
+        random_policy = random_tf_policy.RandomTFPolicy(self.train_env.time_step_spec(), self.train_env.action_spec())
+        initial_collect = random_policy
+        initial_collect_op = dynamic_step_driver.DynamicStepDriver(self.train_env,
+                                                                   initial_collect,
+                                                                   observers=observers,
+                                                                   num_steps=1000).run()
 
-    # collect_step(train_env, collect_policy, buffer)
-    for _ in range(collect_per_iteration):
-        time_step = train_env.current_time_step()
-        action_step = agent.collect_policy.action(time_step)
-        next_time_step = train_env.step(action_step.action)
-        buffer.add_batch(trajectory.from_transition(time_step, action_step, next_time_step))
+        collect_policy = self.agent.collect_policy
+        collect_op = dynamic_step_driver.DynamicStepDriver(self.train_env,
+                                                           collect_policy,
+                                                           observers=observers,
+                                                           num_steps=2).run()
 
-    if step % log_interval == 0:
-        print('step = {0}: loss = {1}'.format(step, loss))
+        dataset = replay_buffer.as_dataset(num_parallel_calls=3,
+                                           sample_batch_size=self.batch_size,
+                                           num_steps=2).prefetch(3)
 
-    if step % eval_interval == 0:
-        observers = [metric]
-        drive2 = dynamic_episode_driver.DynamicEpisodeDriver(eval_env, agent.policy, observers=observers,
-                                                             num_episodes=10)
-        drive2.run()
+        # iterator = tf.compat.v1.data.make_initializable_iterator(dataset)
+        iterator = iter(dataset)
 
-        avg_return = metric.result().numpy()
-        # avg_return = compute_avg_return(eval_env, agent.policy)
-        print('step = {0}: Average Return = {1}'.format(step, avg_return))
-        returns.append(avg_return)
+        self.agent.train = common.function(self.agent.train)
+        self.agent.train_step_counter.assign(0)
+
+        experience, _ = iterator.get_next()
+        # train_op = common.function(self.agent.train)(experience=experience)
+
+        self.agent.initialize()
+
+        for _ in range(num_iterations):
+            for _ in range(1):
+                time_step = self.train_env.current_time_step()
+                action_step = self.agent.collect_policy.action(time_step)
+                next_time_step = self.train_env.step(action_step.action)
+                replay_buffer.add_batch(trajectory.from_transition(time_step, action_step, next_time_step))
+
+            experience, _ = next(iterator)
+            loss = self.agent.train(experience).loss
+            step = self.agent.train_step_counter.numpy()
+
+            if step % log_interval == 0:
+                print('step = {0}: loss = {1}'.format(step, loss))
+
+            if step % eval_interval == 0:
+                metric = tf_metrics.AverageReturnMetric()
+                observers = [metric]
+                drive2 = dynamic_step_driver.DynamicStepDriver(self.eval_env, self.agent.policy, observers=observers,
+                                                               num_steps=eval_interval)
+                drive2.run()
+
+                # avg_return = compute_avg_return(self.eval_env, self.eval_policy)
+                avg_return = metric.result().numpy()
+                print('Average Return = {}'.format(avg_return))
+                self.returns.append(avg_return)
+
+
