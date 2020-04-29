@@ -74,8 +74,6 @@ class DQN:
         else:
             init_agent = dqn_agent.DqnAgent
 
-        obs = self.train_env.reset()
-
         self.q_net = q_network.QNetwork(
             self.train_env.observation_spec(),
             self.train_env.action_spec(),
@@ -91,7 +89,7 @@ class DQN:
             boltzmann_temperature=0.4,
             optimizer=self.optimizer,
             target_update_tau=1,
-            target_update_period=1000,
+            target_update_period=100,
             td_errors_loss_fn=common.element_wise_huber_loss,
             train_step_counter=tf.Variable(0))
 
@@ -164,3 +162,20 @@ class DQN:
                 self.returns.append(avg_return)
 
 
+def main():
+    iters = 20000
+    eval_int = 1000
+    log = 200
+
+    model = DQN(env_name='CartPole-v0')
+    model.train_eval(num_iterations=iters, log_interval=log, eval_interval=eval_int)
+
+    iterations = range(0, iters, eval_int)
+    plt.plot(iterations, model.returns)
+    plt.ylabel('Average Return')
+    plt.xlabel('Iterations')
+    plt.ylim(top=250)
+
+
+if __name__ == "__main__":
+    main()
