@@ -1,0 +1,9 @@
+tensorflow==2.0
+procgen
+gym
+imageio==2.4.0
+PILLOW
+pyglet==1.3.2
+pyvirtualdisplay
+tensorflow-probability==0.8
+tf-agents
