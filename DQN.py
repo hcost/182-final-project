@@ -89,7 +89,7 @@ class DQN:
             boltzmann_temperature=0.4,
             optimizer=self.optimizer,
             target_update_tau=1,
-            target_update_period=100,
+            target_update_period=1000,
             td_errors_loss_fn=common.element_wise_huber_loss,
             train_step_counter=tf.Variable(0))
 
