@@ -16,50 +16,63 @@ from tf_agents.environments import parallel_py_environment
 from tf_agents.environments import tf_py_environment
 from tf_agents.eval import metric_utils
 from tf_agents.metrics import tf_metrics as tfm
+from tf_agents.networks import actor_distribution_network as adn
+from tf_agents.networks import value_network as vn
 from tf_agents.policies import policy_saver
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.utils import common
-from tf_agents.networks import actor_distribution_rnn_network as adrn
-from tf_agents.networks import value_rnn_network as vrn
 
+import impala_network
 import procgen_environment
 import util
 
 
-def create_ppo_networks(tf_env: tf_py_environment.TFPyEnvironment) -> \
-    typing.Tuple[adrn.ActorDistributionRnnNetwork,
-                 vrn.ValueRnnNetwork]:
-  actor_net = adrn.ActorDistributionRnnNetwork(
+def conv_network(sizes=(16, 32, 32)):
+  """Modified impala network using strided conv layers to emulate max pools"""
+  conv_params = []
+  for size in sizes:
+    conv_params.append((size, 3, 1))
+    conv_params.append((size, 3, 1))
+  return conv_params
+
+
+def create_rnn_ppo_networks(tf_env: tf_py_environment.TFPyEnvironment) -> typing.Tuple[
+  adn.ActorDistributionNetwork, vn.ValueNetwork]:
+  actor_net = adn.ActorDistributionNetwork(
     tf_env.observation_spec(),
     tf_env.action_spec(),
-    conv_layer_params=[(16, 8, 4), (32, 4, 2)],
-    input_fc_layer_params=(256,),
-    lstm_size=(256,),
-    output_fc_layer_params=(128,),
-    activation_fn=tf.nn.elu
+    conv_layer_params=conv_network(),
+    fc_layer_params=(256, 256),
+    activation_fn=tf.nn.relu
   )
-  value_net = vrn.ValueRnnNetwork(tf_env.observation_spec(),
-                                  conv_layer_params=[(16, 8, 4), (32, 4, 2)],
-                                  input_fc_layer_params=(256,),
-                                  lstm_size=(256,),
-                                  output_fc_layer_params=(128,),
-                                  activation_fn=tf.nn.elu)
+  value_net = vn.ValueNetwork(tf_env.observation_spec(),
+                              conv_layer_params=conv_network(),
+                              fc_layer_params=(256, 256),
+                              activation_fn=tf.nn.relu)
+  return actor_net, value_net
+
+
+def create_impala_ppo_networks(tf_env: tf_py_environment.TFPyEnvironment) -> typing.Tuple[
+  impala_network.ImpalaDistributionNetwork, impala_network.ImpalaValueNetwork]:
+  actor_net = impala_network.ImpalaDistributionNetwork(tf_env.observation_spec(), tf_env.action_spec(), multiplier=1)
+  value_net = impala_network.ImpalaValueNetwork(tf_env.observation_spec(), multiplier=1)
+
   return actor_net, value_net
 
 
 def train_eval(root_dir,
                env_name='procgen:procgen-fruitbot-v0',
-               num_levels=0,
-               num_environment_steps=50000,
+               num_train_levels=1000,
+               num_environment_steps=25000000,
                collect_episodes_per_iter=10,
                n_parallel_envs=1,
                replay_buffer_capacity=100000,
                num_epochs=50,
                learning_rate=5e-4,
                num_eval_episodes=40,
-               eval_interval=500,
+               eval_interval=100,
                num_video_episodes=20,
-               video_interval=10000,
+               video_interval=500,
                checkpoint_interval=500,
                log_interval=50,
                summary_interval=50,
@@ -86,23 +99,29 @@ def train_eval(root_dir,
 
   with tf.summary.record_if(lambda: tf.math.equal(global_step % summary_interval, 0)):
     start = time.time()
-    eval_py_env = procgen_environment.ProcgenEnvironment(env_name, distribution_mode='easy', num_levels=num_levels)
+    eval_py_env = procgen_environment.ProcgenEnvironment(env_name,
+                                                         distribution_mode='easy',
+                                                         num_levels=0,
+                                                         use_sequential_levels=True)
 
     eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env)
     tf_env = tf_py_environment.TFPyEnvironment(
       parallel_py_environment.ParallelPyEnvironment(
         [lambda: procgen_environment.ProcgenEnvironment(env_name, distribution_mode='easy',
-                                                        num_levels=num_levels)] * n_parallel_envs)
-      if n_parallel_envs != 1 else procgen_environment.ProcgenEnvironment(env_name, distribution_mode='easy',
-                                                                          num_levels=num_levels))
+                                                        num_levels=num_train_levels,
+                                                        use_sequential_levels=True)] * n_parallel_envs)
+      if n_parallel_envs != 1 else procgen_environment.ProcgenEnvironment(env_name,
+                                                                          distribution_mode='easy',
+                                                                          num_levels=num_train_levels,
+                                                                          use_sequential_levels=True))
     logging.info('Took %s to start environments', time.time() - start)
     optim = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate, epsilon=1e-5)
 
-    actor_net, value_net = create_ppo_networks(tf_env)
+    actor_net, value_net = create_impala_ppo_networks(tf_env)
 
     agent = ppo_agent.PPOAgent(tf_env.time_step_spec(),
                                tf_env.action_spec(),
-                               optim,
+                               optimizer=optim,
                                actor_net=actor_net,
                                value_net=value_net,
                                num_epochs=num_epochs,
@@ -178,6 +197,7 @@ def train_eval(root_dir,
     collect_time = 0
     train_time = 0
     timed_at_step = global_step.numpy()
+    env_timed_at_step = environment_step_metric.result().numpy()
 
     while environment_step_metric.result() < num_environment_steps:
       start_time = time.time()
@@ -195,15 +215,19 @@ def train_eval(root_dir,
       global_step_val = global_step.numpy()
 
       if global_step_val % log_interval == 0:
-        logging.info('step %d: loss %f', global_step_val, total_loss)
+        env_step_val = environment_step_metric.result().numpy()
+        logging.info('environment step %d: global step %d: loss %f', env_step_val, global_step_val, total_loss)
         steps_per_sec = (global_step_val - timed_at_step) / (collect_time + train_time)
-        logging.info('%.3f steps per second', steps_per_sec)
+        env_steps_per_sec = (env_step_val - env_timed_at_step) / (collect_time + train_time)
+        logging.info('%.3f global steps per second', steps_per_sec)
+        logging.info('%.3f environment steps per second', env_steps_per_sec)
         logging.info('collect time: %f; train_time: %f', collect_time, train_time)
 
         with tf.summary.record_if(True):
           tf.summary.scalar(name='global_steps_per_sec', data=steps_per_sec, step=global_step)
 
         timed_at_step = global_step_val
+        env_timed_at_step = env_step_val
         collect_time = 0
         train_time = 0
 

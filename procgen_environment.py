@@ -1,9 +1,10 @@
-from collections import deque
+# procgen_environment.py
+# Copyright (c) 2020 Daniel Grimshaw (danielgrimshaw@berkeley.edu)
+#
 
 import gym
 import numpy as np
 from gym import spaces
-from gym import wrappers
 from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step
