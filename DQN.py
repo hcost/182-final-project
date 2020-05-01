@@ -2,6 +2,7 @@ import base64
 import imageio
 import matplotlib
 import matplotlib.pyplot as plt
+import procgen
 
 import numpy as np
 import PIL.Image
@@ -24,6 +25,7 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
+from procgen import ProcgenEnv
 
 env_names = ["procgen:procgen-coinrun-v0",
              'procgen:procgen-starpilot-v0',
@@ -61,8 +63,8 @@ class DQN:
         self.initial_collect_steps = initial_collect_steps
 
         self.env_name = env_name
-        train_py_env = suite_gym.load(self.env_name)
-        eval_py_env = suite_gym.load(self.env_name)
+        train_py_env = ProcgenEnv(num_envs=1, env_name=self.env_name)
+        eval_py_env = ProcgenEnv(num_envs=1, env_name=self.env_name)
         self.train_env = tf_py_environment.TFPyEnvironment(train_py_env)
         self.eval_env = tf_py_environment.TFPyEnvironment(eval_py_env)
 
