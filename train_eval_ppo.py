@@ -62,20 +62,19 @@ def create_impala_ppo_networks(tf_env: tf_py_environment.TFPyEnvironment) -> typ
 
 def train_eval(root_dir,
                env_name='procgen:procgen-fruitbot-v0',
-               num_train_levels=1000,
+               num_train_levels=10000,
                num_environment_steps=25000000,
-               collect_episodes_per_iter=10,
+               collect_episodes_per_iter=8,
                n_parallel_envs=1,
-               replay_buffer_capacity=100000,
-               num_epochs=50,
+               replay_buffer_capacity=10000,
                learning_rate=5e-4,
                num_eval_episodes=40,
-               eval_interval=100,
+               eval_interval=90,
                num_video_episodes=20,
-               video_interval=500,
-               checkpoint_interval=500,
-               log_interval=50,
-               summary_interval=50,
+               video_interval=510,
+               checkpoint_interval=510,
+               log_interval=30,
+               summary_interval=30,
                summary_flush_secs=1,
                use_tf_funcs=True):
   root_dir = os.path.expanduser(root_dir)
@@ -124,12 +123,15 @@ def train_eval(root_dir,
                                optimizer=optim,
                                actor_net=actor_net,
                                value_net=value_net,
-                               num_epochs=num_epochs,
+                               lambda_value=.95,
+                               num_epochs=3,
                                gradient_clipping=0.5,
-                               entropy_regularization=1e-2,
+                               entropy_regularization=0.01,
                                importance_ratio_clipping=0.2,
-                               use_gae=True,
-                               use_td_lambda_return=True)
+                               normalize_rewards=True,
+                               reward_norm_clipping=(-1.5, 32.4),
+                               summarize_grads_and_vars=True,
+                               name='PPO_agent')
     agent.initialize()
 
     environment_step_metric = tfm.EnvironmentSteps()

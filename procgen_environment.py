@@ -20,6 +20,7 @@ class ProcgenEnvironment(py_environment.PyEnvironment):
 
     self._n_actions = self._game.action_space.n
     self._info = None
+    self._done = False
 
     self._act_spec = array_spec.BoundedArraySpec(shape=(), dtype=np.int32, minimum=0, maximum=self._n_actions - 1,
                                                  name='action')
@@ -35,18 +36,19 @@ class ProcgenEnvironment(py_environment.PyEnvironment):
   def _reset(self):
     self._game = ProcessFrame64(gym.make(self.env_name, **self.kwargs))
     self._info = None
+    self._done = False
     obs = self._game.reset()
     return time_step.restart(obs)
 
   def _step(self, action):
-    obs, rew, done, self._info = self._game.step(action)
+    if self._done:
+      return self._reset()
+    obs, rew, self._done, self._info = self._game.step(action)
 
-    if not done:
+    if not self._done:
       return time_step.transition(obs, rew)
 
-    ret = time_step.termination(obs, rew)
-    self._reset()
-    return ret
+    return time_step.termination(obs, rew)
 
   def render(self, mode='rgb_array'):
     return self._game.render(mode=mode)
