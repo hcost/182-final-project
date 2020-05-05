@@ -25,10 +25,12 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
+from tf_agents.agents.categorical_dqn import categorical_dqn_agent
+from tf_agents.networks import categorical_q_network
 
 """
-Some code adapted from TensorFlow tf_agents DQN tutorial with CartPole as an example. 
-Capable of implementing a DQN, DDQN, or Categorical DQN. 
+Some code adapted from TensorFlow tf_agents DQN tutorial with CartPole as an example.
+Capable of implementing a DQN, DDQN, or Categorical DQN.
 """
 
 env_names = ["procgen:procgen-coinrun-v0",
@@ -200,8 +202,10 @@ def main():
                 tup=100,
                 epsilon=0.1,
                 gamma=0.9999,
-                categorical=True)
-    model.train_eval(num_iterations=iters, log_interval=log, eval_interval=eval_int)
+                categorical=False,
+                DDQN=True)
+    # model.train_eval(num_iterations=iters, log_interval=log, eval_interval=eval_int)
+    return model
 
 if __name__ == "__main__":
-    main()
+    model = main()
