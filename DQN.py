@@ -213,10 +213,9 @@ def train(start=0, returns=[]):
 		return returns
 	except KeyboardInterrupt:
 		return returns
-	# except:
-	# 	print("Unexpected Error; Trying to Resume Training")
-	# 	return train(start=i, returns=returns)
-
+	except:
+		print("Unexpected Error; Trying to Resume Training")
+		return train(start=i, returns=returns)
 
 returns = train(returns=returns)
 
@@ -224,5 +223,4 @@ iterations = range(0, params['num_iter'] + 1, params['eval_interval'])
 plt.plot(iterations, returns)
 plt.ylabel('Average Return')
 plt.xlabel('Iterations')
-plt.ylim(top=250)
 plt.savefig(params['model_name']+'_avg_return.png')
