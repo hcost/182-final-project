@@ -39,7 +39,7 @@ params = {
 			'env' : 'procgen:procgen-fruitbot-v0', #procgen:procgen-fruitbot-v0
 			'distribution' : 'easy',
 			'atari' : False, #should really say "not procgen"
-			'video' : True, #only set true for envs with visual obsv spaces
+			'video' : False, #only set true for envs with visual obsv spaces
 			'apply_visual_wrappers' : True, #same as above
 			'frames' : 4, #number of frames to use with visual wrappers
 			'num_iter' : int(1e6),
@@ -93,7 +93,6 @@ agent = dqn_agent.DqnAgent(
 					optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr']),
 					td_errors_loss_fn=common.element_wise_squared_loss,
 					train_step_counter=train_step_counter)
-
 agent.initialize()
 
 eval_policy = greedy_policy.GreedyPolicy(agent.policy)
@@ -218,7 +217,6 @@ def train(start=0, returns=[]):
 	# 	print("Unexpected Error; Trying to Resume Training")
 	# 	return train(start=i, returns=returns)
 
-create_video(agent.policy, params['model_name']+'_pretraining', params['num_eval_episodes'])
 
 returns = train(returns=returns)
 

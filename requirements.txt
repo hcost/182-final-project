@@ -9,3 +9,8 @@ pybullet
 procgen
 pyvirtualdisplay
 tf-agents
+
+
+gcloud beta compute scp --zone "us-west1-b" "nvidia-gpu-cloud-tensorflow-image-1-vm" --project "rich-channel-275920"
+
+gcloud compute scp --project rich-channel-275920 --zone us-west1-b --recurse /usr/local/lib/python3.7/site-packages/procgen-0.9.4.dist-info tensorflow-1-vm:/usr/local/lib/python3.5/site-packages
