@@ -1,4 +1,4 @@
 !apt install python-opengl
 !apt install ffmpeg
 !apt install xvfb
-xquartz for mac
+apt install xquartz

@@ -2,7 +2,7 @@ gym
 imageio
 matplotlib
 PILLOW
-tensorflow
+tensorflow==2.1.0
 tensorflow-probability
 tf-agents
 pybullet
@@ -10,3 +10,5 @@ procgen
 pyvirtualdisplay
 tf-agents
 ffmpeg-python
+IPython
+opencv-python

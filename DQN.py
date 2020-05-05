@@ -39,16 +39,16 @@ params = {
 			'env' : 'procgen:procgen-fruitbot-v0', #procgen:procgen-fruitbot-v0
 			'distribution' : 'easy',
 			'atari' : False, #should really say "not procgen"
-			'video' : False, #only set true for envs with visual obsv spaces
+			'video' : True, #only set true for envs with visual obsv spaces
 			'apply_visual_wrappers' : True, #same as above
 			'frames' : 4, #number of frames to use with visual wrappers
 			'num_iter' : int(1e6),
 			'initial_collect_steps' : 15000,
 			'collect_steps_per_iter' : 1,
-			'replay_buffer_size' : 1000000,
+			'replay_buffer_size' : 100000,
 			'batch_size' : 256,
 			'lr' : 3e-4,
-			'fc_layer_params' : (256, 128),
+			'fc_layer_params' : (128, 64),
 			'log_interval' : 5000,
 			'num_eval_episodes' : 10,
 			'eval_interval' : 10000,
@@ -186,6 +186,12 @@ def create_video(policy, filename, num_episodes=5, fps=30):
                     py_env.step(int(action_step.action))
                     video.append_data(py_env.render(mode='rgb_array'))
 
+def make_graphs(returns):
+	plt.plot(range(0,params['eval_interval']*len(returns), params['eval_interval']),returns)
+	plt.ylabel('Average Return')
+	plt.xlabel('Iterations')
+	plt.savefig(params['model_name']+'_avg_return.png')
+
 
 #Training
 print('Beginning Training')
@@ -208,6 +214,7 @@ def train(start=0, returns=[]):
 				print("\nStep: {}, Current Return: {}, Previous Return: {}\n".format(step, avg_return, returns[-1]))
 				print('-'*20)
 				returns.append(avg_return)
+				make_graphs(returns)
 				if params['video'] and steps % params['record_freq'] == 0:
 					create_video(agent.policy, params['model_name']+'_step_'+str(step), params['num_eval_episodes'])
 		return returns
@@ -217,10 +224,7 @@ def train(start=0, returns=[]):
 		print("Unexpected Error; Trying to Resume Training")
 		return train(start=i, returns=returns)
 
-returns = train(returns=returns)
 
-iterations = range(0, params['num_iter'] + 1, params['eval_interval'])
-plt.plot(iterations, returns)
-plt.ylabel('Average Return')
-plt.xlabel('Iterations')
-plt.savefig(params['model_name']+'_avg_return.png')
+create_video(agent.policy, params['model_name']+'pretraining', params['num_eval_episodes'])
+returns = train(returns=returns)
+make_graphs(returns)
