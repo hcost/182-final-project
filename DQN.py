@@ -7,10 +7,14 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import PIL.Image
-import pyvirtualdisplay
+
+
+import sys, os
+import contextlib
 
 import tensorflow as tf
 import gym
+from gym import wrappers
 
 from tf_agents.agents.dqn import dqn_agent
 from tf_agents.drivers import dynamic_step_driver
@@ -27,53 +31,68 @@ from tf_agents.utils import common
 
 tf.compat.v1.enable_v2_behavior()
 
+
+
 #Hyperparamaters
 params = {
-            'env' : 'procgen:procgen-fruitbot-v0',
-            'distribution' : 'easy',
-            'atari' : False,
-            'num_iter' : 1000000,
-            'initial_collect_steps' : 10000,
-            'collect_steps_per_iter' : 1,
-            'replay_buffer_size' : 1000000,
-            'batch_size' : 256,
-            'lr' : 3e-4,
-            'fc_layer_params' : (256, 128),
-            'log_interval' : 200,
-            'num_eval_episodes' : 10,
-            'eval_interval' : 1000
+			'model_name' : 'model_1',
+			'env' : 'procgen:procgen-fruitbot-v0', #procgen:procgen-fruitbot-v0
+			'distribution' : 'easy',
+			'atari' : False, #should really say "not procgen"
+			'video' : True, #only set true for envs with visual obsv spaces
+			'apply_visual_wrappers' : True, #same as above
+			'frames' : 4, #number of frames to use with visual wrappers
+			'num_iter' : int(1e6),
+			'initial_collect_steps' : 15000,
+			'collect_steps_per_iter' : 1,
+			'replay_buffer_size' : 1000000,
+			'batch_size' : 256,
+			'lr' : 3e-4,
+			'fc_layer_params' : (256, 128),
+			'log_interval' : 5000,
+			'num_eval_episodes' : 10,
+			'eval_interval' : 10000,
+			'record_percent' : 1/10
 }
 
-def make_tf_env():
-    if params['atari']:
-        py_env = gym.make(params['env'])
-    else:
-        py_env = gym.make(params['env'], distribution_mode=params['distribution'])
-    env = suite_gym.wrap_env(py_env)
-    env = tf_py_environment.TFPyEnvironment(env)
-    return env, py_env
+params['record_freq'] = int(params['num_iter'] * params['record_percent'])
 
-train_env, train_py_env = make_tf_env()
-eval_env, eval_py_env = make_tf_env()
+
+
+def make_tf_env(video=False):
+	if params['atari']:
+		py_env = gym.make(params['env'])
+	else:
+		py_env = gym.make(params['env'], distribution_mode=params['distribution'])
+	if params["apply_visual_wrappers"]:
+		py_env = wrappers.gray_scale_observation.GrayScaleObservation(py_env)
+		py_env = wrappers.FrameStack(py_env, params['frames'])
+	env = suite_gym.wrap_env(py_env)
+	env = tf_py_environment.TFPyEnvironment(env)
+	if video:
+		return env, py_env
+	return env
+
+train_env, eval_env = make_tf_env(), make_tf_env()
 
 observation_spec = train_env.observation_spec()
 action_spec = train_env.action_spec()
 
 
 q_net = q_network.QNetwork(
-                    observation_spec,
-                    action_spec,
-                    fc_layer_params=params['fc_layer_params'])
+					observation_spec,
+					action_spec,
+					fc_layer_params=params['fc_layer_params'])
 
 train_step_counter = tf.Variable(0)
 
 agent = dqn_agent.DqnAgent(
-                    train_env.time_step_spec(),
-                    action_spec,
-                    q_network = q_net,
-                    optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr']),
-                    td_errors_loss_fn=common.element_wise_squared_loss,
-                    train_step_counter=train_step_counter)
+					train_env.time_step_spec(),
+					action_spec,
+					q_network = q_net,
+					optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr']),
+					td_errors_loss_fn=common.element_wise_squared_loss,
+					train_step_counter=train_step_counter)
 
 agent.initialize()
 
@@ -84,48 +103,48 @@ collect_policy = agent.collect_policy
 random_policy = random_tf_policy.RandomTFPolicy(train_env.time_step_spec(), action_spec)
 
 replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
-                                            data_spec=agent.collect_data_spec,
-                                            batch_size=train_env.batch_size,
-                                            max_length=params['replay_buffer_size'])
+											data_spec=agent.collect_data_spec,
+											batch_size=train_env.batch_size,
+											max_length=params['replay_buffer_size'])
 
 def collect_data(env, policy, buffer, steps=100):
-    for i in range(steps):
-        collect_step(env, policy, buffer)
+	for i in range(steps):
+		collect_step(env, policy, buffer)
 
 def collect_step(env, policy, buffer):
-    time_step = env.current_time_step()
-    action_step = policy.action(time_step)
-    next_time_step = env.step(action_step.action)
-    traj = trajectory.from_transition(time_step, action_step, next_time_step)
-    buffer.add_batch(traj)
-    if next_time_step.is_last() and not params['atari']:
-        env, _ = make_tf_env()
-        env.reset()
+	time_step = env.current_time_step()
+	action_step = policy.action(time_step)
+	next_time_step = env.step(action_step.action)
+	traj = trajectory.from_transition(time_step, action_step, next_time_step)
+	buffer.add_batch(traj)
+	if next_time_step.is_last() and not params['atari']:
+		env = make_tf_env()
+		env.reset()
 
 collect_data(train_env, random_policy, replay_buffer, steps=params['initial_collect_steps'])
 
 
 
 def compute_avg_return(environment, policy, num_episodes=5):
-    total_return = 0.0
+	total_return = 0.0
 
-    for i in range(num_episodes):
-        if params['atari']:
-            time_step = environment.reset()
-        else:
-            environment, _ = make_tf_env()
-            time_step = environment.reset()
+	for i in range(num_episodes):
+		if params['atari']:
+			time_step = environment.reset()
+		else:
+			environment = make_tf_env()
+			time_step = environment.reset()
 
-        curr_return = 0.0
+		curr_return = 0.0
 
-        while not time_step.is_last():
-            action_step = policy.action(time_step)
-            time_step = environment.step(action_step.action)
-            curr_return += time_step.reward
-        total_return += curr_return
+		while not time_step.is_last():
+			action_step = policy.action(time_step)
+			time_step = environment.step(action_step.action)
+			curr_return += time_step.reward
+		total_return += curr_return
 
-    avg_return = total_return/num_episodes
-    return avg_return.numpy()[0]
+	avg_return = total_return/num_episodes
+	return avg_return.numpy()[0]
 
 
 agent.train = common.function(agent.train)
@@ -133,9 +152,9 @@ agent.train = common.function(agent.train)
 agent.train_step_counter.assign(0)
 
 dataset = replay_buffer.as_dataset(
-                            num_parallel_calls=3,
-                            sample_batch_size=params['batch_size'],
-                            num_steps=2)
+							num_parallel_calls=3,
+							sample_batch_size=params['batch_size'],
+							num_steps=2)
 iterator = iter(dataset)
 
 
@@ -145,52 +164,67 @@ returns = [avg_return]
 
 
 def printProgressBar(iteration, total, prefix = '', suffix = '', decimals = 3, length = 100, fill = '|', printEnd = "\r"):
-    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
-    filledLength = int(length * iteration // total)
-    bar = fill * filledLength + '-' * (length - filledLength)
-    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = printEnd)
-    # Print New Line on Complete
-    if iteration == total:
-        print()
+	percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+	filledLength = int(length * iteration // total)
+	bar = fill * filledLength + '-' * (length - filledLength)
+	print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = printEnd)
+	# Print New Line on Complete
+	if iteration == total:
+		print()
+
+def create_video(policy, filename, num_episodes=5, fps=30):
+    filename += '.mp4'
+    filename = 'videos/'+filename
+    with imageio.get_writer(filename, fps=fps) as video:
+        with open(os.devnull, "w") as f, contextlib.redirect_stderr(f):
+            for _ in range(num_episodes):
+                environment, py_env = make_tf_env(video=True)
+                time_step = environment.reset()
+                while not time_step.is_last():
+                    py_env.reset()
+                    action_step = policy.action(time_step)
+                    time_step = eval_env.step(action_step.action)
+                    py_env.step(int(action_step.action))
+                    video.append_data(py_env.render(mode='rgb_array'))
+
 
 #Training
 print('Beginning Training')
+def train(start=0, returns=[]):
+	try:
+		for i in range(start, params['num_iter']):
+			printProgressBar(i, params['num_iter'])
+			for _ in range(params['collect_steps_per_iter']):
+				collect_step(train_env, agent.collect_policy, replay_buffer)
 
-for i in range(params['num_iter']):
-    printProgressBar(i, params['num_iter'])
-    for _ in range(params['collect_steps_per_iter']):
-        collect_step(train_env, agent.collect_policy, replay_buffer)
+			exp, info = next(iterator)
+			train_loss = agent.train(exp).loss
+			step = agent.train_step_counter.numpy()
 
-    exp, info = next(iterator)
-    train_loss = agent.train(exp).loss
-    step = agent.train_step_counter.numpy()
+			if step % params['log_interval'] == 0:
+				print("\nStep: {}, Loss: {}\n".format(step, train_loss))
+			if step % params['eval_interval'] == 0:
+				avg_return = compute_avg_return(eval_env, agent.policy, params['num_eval_episodes'])
+				print('-'*20)
+				print("\nStep: {}, Current Return: {}, Previous Return: {}\n".format(step, avg_return, returns[-1]))
+				print('-'*20)
+				returns.append(avg_return)
+				if params['video'] and steps % params['record_freq'] == 0:
+					create_video(agent.policy, params['model_name']+'_step_'+str(step), params['num_eval_episodes'])
+		return returns
+	except KeyboardInterrupt:
+		return returns
+	# except:
+	# 	print("Unexpected Error; Trying to Resume Training")
+	# 	return train(start=i, returns=returns)
 
-    if step % params['log_interval'] == 0:
-        print("Step: {}, Loss: {}".format(step, train_loss))
-    if step % params['eval_interval'] == 0:
-        avg_return = compute_avg_return(eval_env, agent.policy, params['num_eval_episodes'])
-        print("Step: {}, Current Return: {}, Previous Return: {}".format(step, avg_return, returns[-1]))
-        returns.append(avg_return)
-        create_video(agent.policy, 'step_'+str(step), params['num_eval_episodes'])
+create_video(agent.policy, params['model_name']+'_pretraining', params['num_eval_episodes'])
+
+returns = train(returns=returns)
 
 iterations = range(0, params['num_iter'] + 1, params['eval_interval'])
 plt.plot(iterations, returns)
 plt.ylabel('Average Return')
 plt.xlabel('Iterations')
 plt.ylim(top=250)
-plt.savefig('loss.png')
-
-def create_video(policy, filename, num_episodes=5, fps=30):
-    filename += '.mp4'
-    filename = 'videos/'+filename
-    with imageio.get_writer(filename, fps=fps) as video:
-        for _ in range(num_episodes):
-            if params['atari']:
-                time_step = environment.reset()
-            else:
-                environment, eval_py_env = make_tf_env()
-                time_step = environment.reset()
-        while not time_step.is_last():
-            action_step = policy.action(time_step)
-            time_step = eval_env.step(action_step.action)
-            video.append_data(eval_py_env.render())
+plt.savefig(params['model_name']+'_avg_return.png')

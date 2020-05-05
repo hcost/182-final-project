@@ -7,3 +7,5 @@ tensorflow-probability
 tf-agents
 pybullet
 procgen
+pyvirtualdisplay
+tf-agents
