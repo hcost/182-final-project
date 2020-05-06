@@ -28,6 +28,8 @@ from tf_agents.policies import random_tf_policy
 from tf_agents.replay_buffers import tf_uniform_replay_buffer
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
+from tf_agents.agents.categorical_dqn import categorical_dqn_agent
+from tf_agents.networks import categorical_q_network
 
 tf.compat.v1.enable_v2_behavior()
 
@@ -35,24 +37,30 @@ tf.compat.v1.enable_v2_behavior()
 
 #Hyperparamaters
 params = {
-			'model_name' : 'model_1',
+			'model_name' : 'cat_model',
 			'env' : 'procgen:procgen-fruitbot-v0', #procgen:procgen-fruitbot-v0
 			'distribution' : 'easy',
 			'atari' : False, #should really say "not procgen"
-			'video' : True, #only set true for envs with visual obsv spaces
+			'video' : True,
 			'apply_visual_wrappers' : True, #same as above
-			'frames' : 4, #number of frames to use with visual wrappers
+			'frames' : 2, #number of frames to use with visual wrappers
+			'categorical' : True,
 			'num_iter' : int(1e6),
 			'initial_collect_steps' : 15000,
 			'collect_steps_per_iter' : 1,
-			'replay_buffer_size' : 100000,
+			'replay_buffer_size' : 1000000,
 			'batch_size' : 256,
-			'lr' : 3e-4,
+			'lr' : 1e-3,
 			'fc_layer_params' : (128, 64),
 			'log_interval' : 5000,
 			'num_eval_episodes' : 10,
 			'eval_interval' : 10000,
-			'record_percent' : 1/10
+			'record_percent' : 1/10,
+			'gamma' : 0.99,
+			'num_atoms' : 51,
+			'min_q_value' : -5,
+			'max_q_value' : 10,
+			'n_step_update' : 2
 }
 
 params['record_freq'] = int(params['num_iter'] * params['record_percent'])
@@ -79,32 +87,54 @@ observation_spec = train_env.observation_spec()
 action_spec = train_env.action_spec()
 
 
-q_net = q_network.QNetwork(
-					observation_spec,
-					action_spec,
-					fc_layer_params=params['fc_layer_params'])
+#set up q_net and agent
+if params['categorical']:
+	q_net = categorical_q_network.CategoricalQNetwork(
+									observation_spec,
+									action_spec,
+									num_atoms=params['num_atoms'],
+									fc_layer_params=params['fc_layer_params'])
 
-train_step_counter = tf.Variable(0)
+	optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr'])
 
-agent = dqn_agent.DqnAgent(
-					train_env.time_step_spec(),
-					action_spec,
-					q_network = q_net,
-					optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr']),
-					td_errors_loss_fn=common.element_wise_squared_loss,
-					train_step_counter=train_step_counter)
+	train_step_counter = tf.compat.v2.Variable(0)
+	agent = categorical_dqn_agent.CategoricalDqnAgent(
+									train_env.time_step_spec(),
+									action_spec,
+									categorical_q_network=q_net,
+									optimizer=optimizer,
+									min_q_value=params['min_q_value'],
+									max_q_value=params['max_q_value'],
+									n_step_update=params['n_step_update'],
+									td_errors_loss_fn=common.element_wise_squared_loss,
+									gamma=params['gamma'],
+									train_step_counter=train_step_counter
+	)
+else:
+	q_net = q_network.QNetwork(
+						observation_spec,
+						action_spec,
+						fc_layer_params=params['fc_layer_params'])
+	train_step_counter = tf.Variable(0)
+	agent = dqn_agent.DqnAgent(
+						train_env.time_step_spec(),
+						action_spec,
+						q_network = q_net,
+						optimizer=tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr']),
+						td_errors_loss_fn=common.element_wise_squared_loss,
+						train_step_counter=train_step_counter)
+
 agent.initialize()
-
-eval_policy = greedy_policy.GreedyPolicy(agent.policy)
-
-collect_policy = agent.collect_policy
-
+collect_policy = greedy_policy.GreedyPolicy(agent.policy)
 random_policy = random_tf_policy.RandomTFPolicy(train_env.time_step_spec(), action_spec)
 
 replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
 											data_spec=agent.collect_data_spec,
 											batch_size=train_env.batch_size,
 											max_length=params['replay_buffer_size'])
+
+
+print("Hey! This is the updated version 4.0!")
 
 def collect_data(env, policy, buffer, steps=100):
 	for i in range(steps):
@@ -121,8 +151,6 @@ def collect_step(env, policy, buffer):
 		env.reset()
 
 collect_data(train_env, random_policy, replay_buffer, steps=params['initial_collect_steps'])
-
-
 
 def compute_avg_return(environment, policy, num_episodes=5):
 	total_return = 0.0
@@ -153,7 +181,7 @@ agent.train_step_counter.assign(0)
 dataset = replay_buffer.as_dataset(
 							num_parallel_calls=3,
 							sample_batch_size=params['batch_size'],
-							num_steps=2)
+							num_steps=params['n_step_update']+1).prefetch(3)
 iterator = iter(dataset)
 
 
@@ -200,7 +228,7 @@ def train(start=0, returns=[]):
 		for i in range(start, params['num_iter']):
 			printProgressBar(i, params['num_iter'])
 			for _ in range(params['collect_steps_per_iter']):
-				collect_step(train_env, agent.collect_policy, replay_buffer)
+				collect_step(train_env, collect_policy, replay_buffer)
 
 			exp, info = next(iterator)
 			train_loss = agent.train(exp).loss
@@ -215,7 +243,7 @@ def train(start=0, returns=[]):
 				print('-'*20)
 				returns.append(avg_return)
 				make_graphs(returns)
-				if params['video'] and steps % params['record_freq'] == 0:
+				if params['video'] and step % params['record_freq'] == 0:
 					create_video(agent.policy, params['model_name']+'_step_'+str(step), params['num_eval_episodes'])
 		return returns
 	except KeyboardInterrupt:
@@ -228,3 +256,4 @@ def train(start=0, returns=[]):
 create_video(agent.policy, params['model_name']+'pretraining', params['num_eval_episodes'])
 returns = train(returns=returns)
 make_graphs(returns)
+create_video(agent.policy, params['model_name']+'post-training', params['num_eval_episodes'])
