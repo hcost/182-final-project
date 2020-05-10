@@ -37,7 +37,7 @@ tf.compat.v1.enable_v2_behavior()
 
 #Hyperparamaters
 params = {
-			'model_name' : 'cat_model',
+			'model_name' : 'model_3',
 			'env' : 'procgen:procgen-fruitbot-v0', #procgen:procgen-fruitbot-v0
 			'distribution' : 'easy',
 			'atari' : False, #should really say "not procgen"
@@ -56,11 +56,11 @@ params = {
 			'num_eval_episodes' : 10,
 			'eval_interval' : 10000,
 			'record_percent' : 1/10,
-			'gamma' : 0.99,
+			'gamma' : 0.95,
 			'num_atoms' : 51,
 			'min_q_value' : -5,
 			'max_q_value' : 10,
-			'n_step_update' : 2
+			'n_step_update' : 3
 }
 
 params['record_freq'] = int(params['num_iter'] * params['record_percent'])
@@ -96,7 +96,7 @@ if params['categorical']:
 									fc_layer_params=params['fc_layer_params'])
 
 	optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=params['lr'])
-
+	params['model_name'] += '_cat'
 	train_step_counter = tf.compat.v2.Variable(0)
 	agent = categorical_dqn_agent.CategoricalDqnAgent(
 									train_env.time_step_spec(),
@@ -134,7 +134,7 @@ replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
 											max_length=params['replay_buffer_size'])
 
 
-print("Hey! This is the updated version 4.0!")
+print("\n\nHey! This is the updated version 6.0!")
 
 def collect_data(env, policy, buffer, steps=100):
 	for i in range(steps):

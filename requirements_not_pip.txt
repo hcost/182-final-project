@@ -1,4 +1,14 @@
-!apt install python-opengl
-!apt install ffmpeg
-!apt install xvfb
+
+for mac use brew
+
+
+apt install python-opengl
+apt install ffmpeg
+apt install xvfb
 apt install xquartz
+apt install cmake
+apt install openmpi
+
+
+(maybe linux is cmake libopenmpi-dev python3-dev zlib1g-dev)
+
