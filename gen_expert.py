@@ -9,7 +9,7 @@ from stable_baselines.gail import generate_expert_traj
 from PIL import Image
 
 env = gym.make(id='procgen:procgen-fruitbot-v0', num_levels=100, distribution_mode='easy')
-episodes = 1
+episodes = 22
 
 
 actions = [0]
