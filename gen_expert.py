@@ -38,8 +38,8 @@ welcome_msg = \
 The controls are w: shoot keys, a: left, s: nop, d: right\n \
 You must press enter after each command. Hold enter to repeatedly enter last used command."
 
-print('-'*50)
+print('-'*100)
 print(welcome_msg)
-print('-'*50)
+print('-'*100)
 
 generate_expert_traj(dummy_expert, 'i_am_the_expert', env, n_episodes=episodes)
