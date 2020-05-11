@@ -25,15 +25,17 @@ log_dir = root_dir + '/' + 'stats/pretrain_ppo2'
 vid_dir = root_dir + '/' + 'videos/pretrain_ppo2'
 vid_freq = 500000
 vid_length = 500
-verbose = 0
+verbose = 1
 num_levels = 100
 seq_levels = True
 record = True
 normalize = True
 
 #Note: Cannot record after loading!
-
-print("Initializing")
+print('-'*50)
+print('V2')
+print('-'*50)
+print("\n\n\nInitializing\n\n\n")
 def make_env(rank, seed=seed):
 	def func():
 		env = gym.make(id='procgen:procgen-fruitbot-v0', use_sequential_levels=seq_levels, num_levels=num_levels, distribution_mode='easy')
@@ -70,8 +72,11 @@ if use_pretraining:
 	model.pretrain(dataset, n_epochs=pretraining_epochs)
 
 print("Training")
+
+model.save(model_name+"_pretrain")
+
 model.learn(training_iterations)
 
-
 model.save(model_name)
+
 env.close()
