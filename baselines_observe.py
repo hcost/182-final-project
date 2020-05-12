@@ -9,10 +9,9 @@ from stable_baselines.gail import ExpertDataset
 import os
 
 
-
 root_dir = os.getcwd()
-model_name = root_dir + '/models/'+ 'pretrained_ppo2'
-use_vec_envs = True
+model_name = root_dir + '/models/'+ 'pretrained_ppo2_revised'
+use_vec_envs = False
 number_of_vec_envs = 4
 framestack = 0 #NOTE: cannot use framestacking and pretraining together
 use_pretraining = True
@@ -21,7 +20,7 @@ traj_limitation = -1 #-1 uses whole dataset
 pretraining_epochs = 100
 training_iterations = 10000000
 policy = 'CnnPolicy'
-seed = 0
+seed = 77
 log_dir = root_dir + '/' + 'stats/pretrain_ppo2'
 vid_dir = root_dir + '/' + 'videos/pretrain_ppo2'
 vid_freq = 500000
@@ -29,15 +28,13 @@ vid_length = 500
 verbose = 1
 num_levels = 100
 seq_levels = True
-record = True
+record = False
 normalize = True
-learning_rate = sbc.schedules.LinearSchedule(20000000, final_p=5e-3, initial_p=2.5e-5)
-auto_save = root_dir + '/models/' + 'autosave'
-save_freq = 500000
+import time
 
 #Note: Cannot record after loading!
 print('-'*50)
-print('V4')
+print('V2')
 print('-'*50)
 print("\n\n\nInitializing\n\n\n")
 def make_env(rank, seed=seed):
@@ -69,25 +66,33 @@ else:
 	if normalize:
 		env = sbc.vec_env.VecNormalize(env)
 
-eval_env = sbc.vec_env.DummyVecEnv([make_env(50)])
-if normalize:
-	eval_env = sbc.vec_env.VecNormalize(env)
 
-eval = sbc.callbacks.CheckpointCallback(save_freq=save_freq, save_path=auto_save, name_prefix='revised_ppo2_')
+model = sb.PPO2.load(model_name, env)
 
-model = sb.PPO2(policy, env, verbose=verbose, tensorboard_log=log_dir, learning_rate=learning_rate.value)
+# if use_pretraining:
+# 	print("Pretraining\n")
+# 	dataset = ExpertDataset(expert_path=expert_dir, traj_limitation=traj_limitation, verbose=verbose)
+# 	model.pretrain(dataset, n_epochs=pretraining_epochs)
+#
+# print("Training")
+#
+# model.save(model_name+"_pretrain")
+#
+# model.learn(training_iterations)
+#
+# model.save(model_name)
 
-if use_pretraining:
-	print("Pretraining\n")
-	dataset = ExpertDataset(expert_path=expert_dir, traj_limitation=traj_limitation, verbose=verbose)
-	model.pretrain(dataset, n_epochs=pretraining_epochs)
+cum_reward = 0
+obs = env.reset()
+for i in range(1000):
+	action, _states = model.predict(obs)
+	obs, rewards, dones, info = env.step(action)
+	cum_reward += rewards
+	env.render()
+	time.sleep(.1)
+	if dones:
+		print(cum_reward)
+		cum_reward = 0
 
-print("Training")
-
-model.save(model_name+"_sanity")
-
-model.learn(training_iterations, callback=eval)
-
-model.save(model_name)
 
 env.close()

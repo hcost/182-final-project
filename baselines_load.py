@@ -11,33 +11,37 @@ import os
 
 
 root_dir = os.getcwd()
-model_name = root_dir + '/models/'+ 'pretrained_ppo2'
+model_name = root_dir + '/models/'+ 'pretrained_ppo2_revised'
 use_vec_envs = True
-number_of_vec_envs = 4
+number_of_vec_envs = 8
 framestack = 0 #NOTE: cannot use framestacking and pretraining together
-use_pretraining = True
+use_pretraining = False
 expert_dir = root_dir + '/' + 'i_am_the_expert.npz'
 traj_limitation = -1 #-1 uses whole dataset
-pretraining_epochs = 100
-training_iterations = 10000000
+pretraining_epochs = 44
+training_iterations = 200000000
 policy = 'CnnPolicy'
 seed = 0
-log_dir = root_dir + '/' + 'stats/pretrain_ppo2'
-vid_dir = root_dir + '/' + 'videos/pretrain_ppo2'
+log_dir = root_dir + '/' + 'stats/pretrain_ppo2_revised2'
+vid_dir = root_dir + '/' + 'videos/pretrain_ppo2_revised2'
 vid_freq = 500000
-vid_length = 500
+vid_length = 1750
 verbose = 1
 num_levels = 100
 seq_levels = True
 record = True
 normalize = True
-learning_rate = sbc.schedules.LinearSchedule(20000000, final_p=5e-3, initial_p=2.5e-5)
+learning_rate = sbc.schedules.LinearSchedule(50000, final_p=5e-5, initial_p=2.5e-3)
 auto_save = root_dir + '/models/' + 'autosave'
 save_freq = 500000
 
 #Note: Cannot record after loading!
+
+
+
+
 print('-'*50)
-print('V4')
+print('V6')
 print('-'*50)
 print("\n\n\nInitializing\n\n\n")
 def make_env(rank, seed=seed):
@@ -69,13 +73,12 @@ else:
 	if normalize:
 		env = sbc.vec_env.VecNormalize(env)
 
-eval_env = sbc.vec_env.DummyVecEnv([make_env(50)])
-if normalize:
-	eval_env = sbc.vec_env.VecNormalize(env)
 
 eval = sbc.callbacks.CheckpointCallback(save_freq=save_freq, save_path=auto_save, name_prefix='revised_ppo2_')
 
-model = sb.PPO2(policy, env, verbose=verbose, tensorboard_log=log_dir, learning_rate=learning_rate.value)
+model = sb.PPO2.load(model_name, env, {'learning_rate': learning_rate.value, 'tensorboard_log' : log_dir})
+
+model.save(model_name + '_sanity2')
 
 if use_pretraining:
 	print("Pretraining\n")
@@ -83,11 +86,11 @@ if use_pretraining:
 	model.pretrain(dataset, n_epochs=pretraining_epochs)
 
 print("Training")
+try:
+	model.learn(training_iterations, callback=eval)
+except:
+	print("Error or interruption; saving model")
 
-model.save(model_name+"_sanity")
-
-model.learn(training_iterations, callback=eval)
-
-model.save(model_name)
+model.save(model_name + '_revised2')
 
 env.close()
